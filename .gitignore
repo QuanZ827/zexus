@@ -1,0 +1,53 @@
+# Build output
+bin/
+obj/
+
+# Installer output (generated EXE)
+Installer/Output/
+
+# Claude Code
+.claude/
+
+# IDE
+.vs/
+*.user
+*.suo
+*.userprefs
+launchSettings.json
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+nul
+
+# WiX cache and build artifacts
+.wix/
+Installer/*.msi
+Installer/*.wixpdb
+
+# Reference/design files
+ai-agent-ui-reference.*
+
+# Sensitive / Secrets
+*.env
+appsettings.local.json
+Installer/api_key.txt
+Installer/team_config.json
+
+# Developer-specific context (not needed by contributors)
+CLAUDE_CODE_CONTEXT.md
+CLAUDE_CODE_PROMPT.md
+PROMPT_FOR_CLAUDE_CODE.md
+IMPLEMENTATION_PLAN.md
+DEV_SUMMARY.md
+CHANGELOG.md
+task_plan.md
+findings.md
+progress.md
+
+# Internal development docs (specs, fix notes, planning)
+docs/internal/
+
+# Audit / pre-public-release private files
+audit-keywords.txt

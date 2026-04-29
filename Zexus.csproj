@@ -1,0 +1,113 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net48;net8.0-windows</TargetFrameworks>
+    <LangVersion>9.0</LangVersion>
+    <UseWPF>true</UseWPF>
+    <PlatformTarget>x64</PlatformTarget>
+    <Nullable>disable</Nullable>
+    <AssemblyName>Zexus</AssemblyName>
+    <RootNamespace>Zexus</RootNamespace>
+    <Version>0.2.0</Version>
+    <Authors>Zhequan Zhang</Authors>
+    <Description>Pure ExecuteCode AI Agent for Revit — Testing Only</Description>
+  </PropertyGroup>
+
+  <!-- Release: no PDB to reduce installer size -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugSymbols>false</DebugSymbols>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+  <!-- net48 = Revit 2023/2024 (.NET Framework 4.8) -->
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net48'">
+    <DefineConstants>$(DefineConstants);REVIT_2023_2024</DefineConstants>
+  </PropertyGroup>
+
+  <!-- net8.0-windows = Revit 2025/2026 (.NET 8) -->
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net8.0-windows'">
+    <DefineConstants>$(DefineConstants);REVIT_2025_OR_GREATER</DefineConstants>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
+  </PropertyGroup>
+
+  <!-- Revit API via NuGet: use lowest supported version for widest compatibility -->
+  <!-- net48: Revit 2022 API (backward-compatible with 2023/2024) -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+    <PackageReference Include="Revit_All_Main_Versions_API_x64" Version="2022.0.0" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0-windows'">
+    <PackageReference Include="Revit_All_Main_Versions_API_x64" Version="2025.0.0" />
+  </ItemGroup>
+
+  <!-- System.Net.Http: only needed for net48 (built-in for net8.0) -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+    <Reference Include="System.Net.Http" />
+  </ItemGroup>
+
+  <!-- System.Text.Json and AsyncInterfaces: only needed for net48 (built-in for net8.0) -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+    <PackageReference Include="System.Text.Json" Version="6.0.10" />
+    <PackageReference Include="Microsoft.Bcl.AsyncInterfaces" Version="6.0.0" />
+  </ItemGroup>
+
+  <!-- Roslyn: for dynamic C# code compilation (ExecuteCode tool) -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\icon_16.png" />
+    <EmbeddedResource Include="Resources\icon_32.png" />
+    <EmbeddedResource Include="Resources\icon_96.png" />
+  </ItemGroup>
+
+  <!-- Post-build: Auto deploy to detected Revit Addins folders -->
+  <Target Name="PostBuild" AfterTargets="PostBuildEvent">
+    <Message Importance="High" Text="Deploying Zexus ($(TargetFramework)) to Revit Addins folders..." />
+
+    <!-- net48 output → deploy to Revit 2023 and 2024 -->
+    <CallTarget Targets="DeployToRevitVersion" Condition="'$(TargetFramework)' == 'net48'" />
+    <!-- net8.0 output → deploy to Revit 2025 and 2026 -->
+    <CallTarget Targets="DeployToRevitVersion" Condition="'$(TargetFramework)' == 'net8.0-windows'" />
+  </Target>
+
+  <Target Name="DeployToRevitVersion">
+    <!-- Determine which versions to deploy to based on target framework -->
+    <PropertyGroup Condition="'$(TargetFramework)' == 'net48'">
+      <RevitVersions>2022;2023;2024</RevitVersions>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(TargetFramework)' == 'net8.0-windows'">
+      <RevitVersions>2025;2026</RevitVersions>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <RevitVersion Include="$(RevitVersions)" />
+      <OutputDlls Include="$(TargetDir)*.dll" Exclude="$(TargetDir)RevitAPI*.dll" />
+    </ItemGroup>
+
+    <!-- Deploy to each version's Addins folder if it exists -->
+    <MSBuild Projects="$(MSBuildProjectFile)"
+             Targets="DeploySingleVersion"
+             Properties="DeployVersion=%(RevitVersion.Identity);TargetDir=$(TargetDir);ProjectDir=$(ProjectDir)"
+             Condition="Exists('$(APPDATA)\Autodesk\Revit\Addins\%(RevitVersion.Identity)')" />
+  </Target>
+
+  <Target Name="DeploySingleVersion">
+    <PropertyGroup>
+      <DeployFolder>$(APPDATA)\Autodesk\Revit\Addins\$(DeployVersion)</DeployFolder>
+    </PropertyGroup>
+
+    <MakeDir Directories="$(DeployFolder)\Zexus" Condition="!Exists('$(DeployFolder)\Zexus')" />
+
+    <ItemGroup>
+      <DeployDlls Include="$(TargetDir)*.dll" Exclude="$(TargetDir)RevitAPI*.dll" />
+    </ItemGroup>
+
+    <Copy SourceFiles="@(DeployDlls)" DestinationFolder="$(DeployFolder)\Zexus" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(ProjectDir)Zexus.addin" DestinationFolder="$(DeployFolder)" SkipUnchangedFiles="true" />
+
+    <Message Importance="High" Text="  -> Deployed to Revit $(DeployVersion): $(DeployFolder)" />
+  </Target>
+
+</Project>
