@@ -12,7 +12,7 @@
 
   <Package Name="Zexus for Revit"
            Manufacturer="Zhequan Zhang"
-           Version="0.2.0"
+           Version="0.2.0.1"
            UpgradeCode="067678A5-8ACD-4BEC-B82A-6D3DBBB11C87"
            Scope="perUser"
            InstallerVersion="500">

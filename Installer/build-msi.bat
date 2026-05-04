@@ -57,7 +57,7 @@ set "WIX_SRC=%~dp0Zexus.wxs"
 if not exist "%~dp0Output" mkdir "%~dp0Output"
 
 :: Run WiX build
-wix build "%WIX_SRC%" -o "%~dp0Output\Zexus_Setup_v0.2.0.msi" -arch x64
+wix build "%WIX_SRC%" -o "%~dp0Output\Zexus_Setup_v0.2.0.1.msi" -arch x64
 if errorlevel 1 (
     echo.
     echo [ERROR] MSI compilation failed!
@@ -67,12 +67,12 @@ if errorlevel 1 (
 
 echo.
 echo Verifying MSI...
-if exist "%~dp0Output\Zexus_Setup_v0.2.0.msi" (
+if exist "%~dp0Output\Zexus_Setup_v0.2.0.1.msi" (
     echo.
     echo ==========================================
     echo   SUCCESS!
     echo.
-    echo   MSI Installer: Installer\Output\Zexus_Setup_v0.2.0.msi
+    echo   MSI Installer: Installer\Output\Zexus_Setup_v0.2.0.1.msi
     echo.
     echo   This MSI supports Revit 2022-2026.
     echo   Supports silent install: msiexec /i Zexus_Setup.msi /qn
