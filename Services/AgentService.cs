@@ -126,6 +126,15 @@ namespace Zexus.Services
                 };
             }
 
+            // Compute confirmation status once. IsChoiceConfirmation is the
+            // RC-1 guarded variant — it catches "选B" / "用方案A" / "合并 X 和 Y"
+            // style messages that look like fresh requests keyword-wise but
+            // mean confirmation in the context of a previously-presented plan.
+            // Only checked when IsConfirmationMessage didn't already match.
+            bool isConfirm = IsConfirmationMessage(userMessage);
+            bool isChoiceConfirm = !isConfirm && IsChoiceConfirmation(userMessage, _currentSession);
+            bool effectivelyConfirm = isConfirm || isChoiceConfirm;
+
             // Check if user wants to continue from interrupted task
             string processedMessage = userMessage;
             if (IsContinueCommand(userMessage) && _sessionContext.HasRecoverableInterrupt())
@@ -135,7 +144,7 @@ namespace Zexus.Services
                 processedMessage = $"{userMessage}\n\n[SYSTEM: Previous session context - DO NOT repeat completed steps, continue from where you left off]\n{contextSummary}";
                 ZexusLogger.Info($"Injecting session context for resume: {contextSummary.Length} chars");
             }
-            else if (!IsContinueCommand(userMessage) && !IsConfirmationMessage(userMessage))
+            else if (!IsContinueCommand(userMessage) && !effectivelyConfirm)
             {
                 // New task - start fresh context (but keep tool history)
                 _sessionContext.StartTask(userMessage);
@@ -145,13 +154,13 @@ namespace Zexus.Services
 
             // If there are pending policy confirmations and user message looks like approval,
             // mark them as confirmed so the LLM can re-call the blocked tools
-            if (_toolLoop.PendingPolicyConfirmations.Count > 0 && IsConfirmationMessage(userMessage))
+            if (_toolLoop.PendingPolicyConfirmations.Count > 0 && effectivelyConfirm)
             {
                 _consecutiveConfirmationCount++;
                 ZexusLogger.Info($"User confirmed {_toolLoop.PendingPolicyConfirmations.Count} pending policy operations");
                 _toolLoop.HandleUserConfirmation(new List<string>(_toolLoop.PendingPolicyConfirmations));
             }
-            else if (_toolLoop.PendingPolicyConfirmations.Count == 0 && IsConfirmationMessage(userMessage))
+            else if (_toolLoop.PendingPolicyConfirmations.Count == 0 && effectivelyConfirm)
             {
                 _consecutiveConfirmationCount++;
 
@@ -164,7 +173,7 @@ namespace Zexus.Services
                 // Inject a system nudge to force the LLM to execute immediately
                 // instead of responding with more text/re-asking for confirmation.
                 processedMessage += "\n\n[SYSTEM: The user has confirmed. EXECUTE the plan NOW by calling the required tools. Do NOT describe the plan again. Do NOT ask for more confirmation. Call ExecuteCode or the appropriate tool IMMEDIATELY.]";
-                ZexusLogger.Info("Injected execution nudge for LLM-initiated confirmation (blanket write enabled)");
+                ZexusLogger.Info($"Injected execution nudge for {(isChoiceConfirm ? "choice-as-confirmation" : "LLM-initiated confirmation")} (blanket write enabled)");
 
                 // Circuit breaker: 3+ consecutive confirmations = autoregressive spiral
                 if (_consecutiveConfirmationCount >= 3)
@@ -193,7 +202,7 @@ namespace Zexus.Services
             {
                 // No tool filtering needed — only ExecuteCode is registered
                 var filteredTools = _toolDefinitions;
-                string messageType = IsConfirmationMessage(userMessage) ? "confirmation_message" : "normal_request";
+                string messageType = effectivelyConfirm ? "confirmation_message" : "normal_request";
                 // Note: RecordToolFilter is not called — no filtering in default mode
 
                 var result = await _toolLoop.RunAsync(_client, _currentSession, filteredTools, cancellationToken);
@@ -289,10 +298,17 @@ namespace Zexus.Services
             if (string.IsNullOrWhiteSpace(message)) return false;
 
             var lower = message.ToLower().Trim();
+            // Unguarded confirmations: phrases that are unambiguous "yes" / "go".
+            // Phrases that are ambiguous as a fresh request (e.g. "选", "合并",
+            // "删除", "保留") live in IsChoiceConfirmation under a previous-plan
+            // guard instead — only multi-word English phrases like "option a" or
+            // "do option" that don't substring-match common Chinese requests are
+            // safe to add unguarded here.
             var confirmKeywords = new[]
             {
                 "yes", "confirm", "go ahead", "proceed", "approve", "do it",
                 "ok", "okay", "sure", "agreed", "execute", "run it", "y",
+                "option a", "option b", "option c", "do option", "go with",
                 "是", "确认", "好的", "可以", "执行", "没问题", "继续", "同意",
                 "好", "行", "嗯", "对", "1"
             };
@@ -300,6 +316,76 @@ namespace Zexus.Services
             foreach (var keyword in confirmKeywords)
             {
                 if (lower.Contains(keyword)) return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// "Choice-as-confirmation" detector: catches messages that look like a
+        /// fresh request keyword-wise ("选B 和seq3合并", "用方案A", "走方案2") but
+        /// which the user actually means as confirmation/execution after the LLM
+        /// presented options or a plan in the previous turn.
+        ///
+        /// Guarded by <see cref="LastAssistantMessageContainsPlan"/>: returns
+        /// false unless the most recent assistant message in the session shows
+        /// a plan/options pattern — otherwise a brand-new "帮我删除这些元素"
+        /// would be misclassified as confirmation.
+        /// </summary>
+        internal static bool IsChoiceConfirmation(string message, Session session)
+        {
+            if (string.IsNullOrWhiteSpace(message)) return false;
+            if (session == null) return false;
+
+            var lower = message.ToLower().Trim();
+
+            // Choice / embedded-instruction keywords. These deliberately are NOT
+            // in IsConfirmationMessage because each one is also a perfectly valid
+            // fresh-request keyword on its own.
+            var choiceKeywords = new[]
+            {
+                "选", "方案", "option a", "option b", "option c",
+                "do option", "go with", "用", "走", "开始",
+                "合并", "保留", "删除", "移除", "应用"
+            };
+
+            bool hasChoiceKeyword = false;
+            foreach (var keyword in choiceKeywords)
+            {
+                if (lower.Contains(keyword)) { hasChoiceKeyword = true; break; }
+            }
+
+            if (!hasChoiceKeyword) return false;
+
+            return LastAssistantMessageContainsPlan(session);
+        }
+
+        /// <summary>
+        /// Guard for IsChoiceConfirmation: did the most recent assistant message
+        /// in <paramref name="session"/> present a plan or options? Looks for
+        /// explicit option markers (方案A / Option A / A: / B: / 1. / 2.) and
+        /// confirmation prompts (确认后 / 请确认 / 确认 / 建议).
+        /// </summary>
+        private static bool LastAssistantMessageContainsPlan(Session session)
+        {
+            if (session?.Messages == null) return false;
+
+            // Walk backward to the most recent assistant message.
+            for (int i = session.Messages.Count - 1; i >= 0; i--)
+            {
+                var msg = session.Messages[i];
+                if (msg.Role != MessageRole.Assistant) continue;
+
+                var content = msg.Content ?? "";
+                var lower = content.ToLowerInvariant();
+
+                return content.Contains("方案A") || content.Contains("方案B") || content.Contains("方案C") ||
+                       content.Contains("方案一") || content.Contains("方案二") || content.Contains("方案三") ||
+                       lower.Contains("option a") || lower.Contains("option b") || lower.Contains("option c") ||
+                       content.Contains("A:") || content.Contains("B:") ||
+                       content.Contains("1.") || content.Contains("2.") ||
+                       content.Contains("确认后") || content.Contains("请确认") || content.Contains("确认") ||
+                       content.Contains("建议");
             }
 
             return false;
