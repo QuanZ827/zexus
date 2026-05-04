@@ -207,6 +207,18 @@ namespace Zexus.Tools
                 ZexusLogger.Info($"[TRUNCATION] Output truncated from {result.Output.Length} to {outputText.Length} chars");
             }
 
+            // RC-2 (phantom-success): if the code wrapped a Transaction but DocumentChanged
+            // observed zero elements created/modified/deleted, the operation was a no-op
+            // (e.g. all targets [SKIP]-ped due to wrong IDs/filter). Surface a warning
+            // both inline in the output (so the LLM sees it) and as a structured flag.
+            if (hasTransaction && addedIds.Count == 0 && modifiedIds.Count == 0 && deletedIds.Count == 0)
+            {
+                var warningText = "\n⚠ WARNING: Code contained a Transaction but no elements were created, modified, or deleted. " +
+                                  "The operation may have been a no-op. Verify the results before reporting success to the user.";
+                outputText += warningText;
+                data["zero_modification_warning"] = true;
+            }
+
             // Use truncated output in data
             data["output"] = outputText;
 
