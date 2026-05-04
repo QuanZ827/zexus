@@ -763,7 +763,7 @@ namespace Zexus.Services
 
             var lower = text.ToLowerInvariant();
 
-            // Must contain a success/completion claim
+            // Past/perfect-tense completion claims (existing).
             bool hasCompletionClaim =
                 lower.Contains("已经") || lower.Contains("已成功") || lower.Contains("创建完成") ||
                 lower.Contains("配置完毕") || lower.Contains("设置完成") || lower.Contains("执行完成") ||
@@ -771,7 +771,28 @@ namespace Zexus.Services
                 lower.Contains("i have created") || lower.Contains("completed") ||
                 lower.Contains("done!") || lower.Contains("finished");
 
-            if (!hasCompletionClaim) return false;
+            // RC-3: future-tense / imperative action claims. Without these, the
+            // LLM saying "I'll merge them" / "我来合并 X" without a tool call
+            // slips past the past-tense-only check.
+            bool hasFutureTenseClaim =
+                lower.Contains("我来") || lower.Contains("我将") || lower.Contains("接下来") ||
+                lower.Contains("现在") || lower.Contains("i will") || lower.Contains("i'll") ||
+                lower.Contains("let me") || lower.Contains("going to");
+
+            if (!hasCompletionClaim && !hasFutureTenseClaim) return false;
+
+            // Future-tense alone false-positives on legitimate plan presentations
+            // (long "接下来我会...请确认" plans). Apply a short-message guard ONLY
+            // to the future-tense-only path: the message must be < 500 chars and
+            // not end with a question mark. Past-tense completion claims keep
+            // their existing unconditional behavior — those are stronger signals
+            // and don't need the length/question filter.
+            if (!hasCompletionClaim && hasFutureTenseClaim)
+            {
+                if (text.Length >= 500) return false;
+                var trimmed = text.TrimEnd();
+                if (trimmed.EndsWith("?") || trimmed.EndsWith("？")) return false;
+            }
 
             // Must also reference a concrete Revit action (tool-like operation)
             bool hasActionReference =
