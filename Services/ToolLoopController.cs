@@ -649,7 +649,9 @@ namespace Zexus.Services
                     return false;
                 });
 
-                if (allReadOnly && DetectConfirmationNudge(conversationMessages))
+                // RC-5: also trip the read-only guard when the user gave a
+                // fresh execution instruction (not just a confirmation nudge).
+                if (allReadOnly && (DetectConfirmationNudge(conversationMessages) || DetectExecutionIntent(conversationMessages)))
                 {
                     _lastIterationWasReadOnlyEC = true;
                 }
@@ -802,6 +804,52 @@ namespace Zexus.Services
                     var content = messages[i].TryGetValue("content", out var c) ? c?.ToString() : "";
                     return content != null && content.Contains("EXECUTE the plan NOW");
                 }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// RC-5 (phantom-success): broader trigger for the read-only-after-
+        /// instruction guardrail. The original guard required an EXECUTE-the-plan
+        /// nudge from AgentService (i.e., user message classified as confirmation),
+        /// which missed cases where the user gave a fresh execution instruction
+        /// like "添加 fields 到 schedule" — not a confirmation, but clearly a write.
+        ///
+        /// Detects whether the most recent real user message in the conversation
+        /// (skipping pure [SYSTEM] correction injections from this loop) contains
+        /// an execution verb. If so, and the iteration just produced only
+        /// read-only ExecuteCode, the read-only guard fires and tells the LLM
+        /// to retry with a Transaction.
+        ///
+        /// Walk direction: BACKWARD — mirrors DetectConfirmationNudge's pattern
+        /// and ensures the *current turn's* request is checked rather than
+        /// turn 1's request (which would happen if walking forward, since
+        /// conversationMessages spans the whole session).
+        /// </summary>
+        private bool DetectExecutionIntent(List<Dictionary<string, object>> messages)
+        {
+            for (int i = messages.Count - 1; i >= 0; i--)
+            {
+                if (!messages[i].TryGetValue("role", out var role)) continue;
+                if (!"user".Equals(role?.ToString())) continue;
+
+                var content = messages[i].TryGetValue("content", out var c) ? c?.ToString() : "";
+                if (content == null) continue;
+
+                // Skip pure [SYSTEM] correction injections this loop adds itself
+                // (e.g. "[SYSTEM] You did NOT actually call any tools..."). Real
+                // user messages with appended "[SYSTEM: ... has confirmed ...]"
+                // nudges have the original user text earlier in the string and
+                // do not match the "[SYSTEM]" closing-bracket prefix.
+                if (content.Contains("[SYSTEM]")) continue;
+
+                var lower = content.ToLowerInvariant();
+                return lower.Contains("添加") || lower.Contains("修复") || lower.Contains("修改") ||
+                       lower.Contains("写入") || lower.Contains("创建") || lower.Contains("删除") ||
+                       lower.Contains("移动") || lower.Contains("设置") || lower.Contains("应用") ||
+                       lower.Contains("fix") || lower.Contains("add") || lower.Contains("create") ||
+                       lower.Contains("move") || lower.Contains("set") || lower.Contains("apply") ||
+                       lower.Contains("write") || lower.Contains("update") || lower.Contains("remove");
             }
             return false;
         }
