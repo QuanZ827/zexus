@@ -25,6 +25,32 @@ namespace Zexus.Models
         public string Content { get; set; }
         public DateTime Timestamp { get; set; } = DateTime.Now;
         public List<ToolCall> ToolCalls { get; set; }
+
+        /// <summary>
+        /// Optional image attachments for multimodal messages.
+        /// Stored as encoded byte arrays (PNG for clipboard captures).
+        /// Cleared after the first API round-trip (see ToolLoopController).
+        /// </summary>
+        public List<ImageAttachment> Images { get; set; }
+
+        /// <summary>True after images have been degraded to placeholder text in history.</summary>
+        public bool ImagesStripped { get; set; }
+    }
+
+    /// <summary>
+    /// A single image attached to a user message. Stored as raw encoded bytes
+    /// (no WPF UI types — those have thread affinity and shouldn't live in the model).
+    /// </summary>
+    public class ImageAttachment
+    {
+        /// <summary>Encoded image bytes. Always PNG for clipboard captures.</summary>
+        public byte[] Data { get; set; }
+
+        /// <summary>MIME type — "image/png" for clipboard captures.</summary>
+        public string MimeType { get; set; } = "image/png";
+
+        /// <summary>Display label for the history placeholder ("[1 image(s) attached]").</summary>
+        public string Label { get; set; } = "Screenshot";
     }
 
     public class ToolCall
