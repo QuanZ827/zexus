@@ -62,6 +62,12 @@ namespace Zexus.Services
                     requestBody["tools"] = FormatToolDefinitions(tools);
                 }
 
+                // Translate the internal {type:"image", mime_type, data} content blocks
+                // into Anthropic's {type:"image", source:{type:"base64", media_type, data}}
+                // shape. Mutates messages in place; non-image blocks and text-only messages
+                // are left alone.
+                RewriteImageBlocksForAnthropic(messages);
+
                 var json = JsonSerializer.Serialize(requestBody);
                 var content = new StringContent(json, Encoding.UTF8, "application/json");
 
@@ -305,6 +311,52 @@ namespace Zexus.Services
         public void Dispose()
         {
             _httpClient?.Dispose();
+        }
+
+        /// <summary>
+        /// Walk the conversation messages and rewrite each internal image block
+        /// (<c>{type:"image", mime_type, data}</c>) into Anthropic's native shape
+        /// (<c>{type:"image", source:{type:"base64", media_type, data}}</c>).
+        ///
+        /// AnthropicClient does not have a per-block message-conversion step the
+        /// way GeminiClient does — messages are JSON-serialized straight into the
+        /// request body. So image translation has to run as a pre-serialize pass
+        /// here. Mutates the list in place; messages without image blocks (text-
+        /// only and tool-result-only messages) pass through untouched.
+        /// </summary>
+        private static void RewriteImageBlocksForAnthropic(List<Dictionary<string, object>> messages)
+        {
+            if (messages == null) return;
+
+            foreach (var msg in messages)
+            {
+                if (msg == null) continue;
+                if (!msg.TryGetValue("content", out var contentObj)) continue;
+                if (!(contentObj is List<object> blocks)) continue;
+
+                for (int i = 0; i < blocks.Count; i++)
+                {
+                    if (!(blocks[i] is Dictionary<string, object> blockDict)) continue;
+                    if (!blockDict.TryGetValue("type", out var typeObj)) continue;
+                    if (typeObj?.ToString() != "image") continue;
+
+                    var mimeType = blockDict.TryGetValue("mime_type", out var mt) && mt != null
+                        ? mt.ToString()
+                        : "image/png";
+                    var data = blockDict.TryGetValue("data", out var d) ? d?.ToString() : null;
+
+                    blocks[i] = new Dictionary<string, object>
+                    {
+                        ["type"] = "image",
+                        ["source"] = new Dictionary<string, object>
+                        {
+                            ["type"] = "base64",
+                            ["media_type"] = mimeType,
+                            ["data"] = data
+                        }
+                    };
+                }
+            }
         }
 
         private Dictionary<string, object> ConvertJsonElementDict(Dictionary<string, JsonElement> rawDict)

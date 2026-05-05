@@ -410,6 +410,22 @@ namespace Zexus.Services
                                             });
                                         }
                                         break;
+                                    case "image":
+                                        // Internal {type:"image", mime_type, data} → Gemini's
+                                        // inlineData part {inlineData:{mimeType, data}}.
+                                        var imgMime = blockDict.ContainsKey("mime_type") && blockDict["mime_type"] != null
+                                            ? blockDict["mime_type"].ToString()
+                                            : "image/png";
+                                        var imgData = blockDict.ContainsKey("data") ? blockDict["data"]?.ToString() : null;
+                                        parts.Add(new Dictionary<string, object>
+                                        {
+                                            ["inlineData"] = new Dictionary<string, object>
+                                            {
+                                                ["mimeType"] = imgMime,
+                                                ["data"] = imgData
+                                            }
+                                        });
+                                        break;
                                     case "tool_use":
                                         // Convert to functionCall part
                                         var funcCall = new Dictionary<string, object>

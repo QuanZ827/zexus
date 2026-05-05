@@ -73,6 +73,12 @@ namespace Zexus.Services
                     requestBody["tools"] = FormatToolDefinitions(tools);
                 }
 
+                // Translate the internal {type:"image", mime_type, data} content blocks
+                // into OpenAI's {type:"image_url", image_url:{url:"data:...;base64,...",
+                // detail:"auto"}} shape. Mutates the message dicts in place; apiMessages
+                // sees the change because it stores the same Dictionary references.
+                RewriteImageBlocksForOpenAi(messages);
+
                 var json = JsonSerializer.Serialize(requestBody);
                 var content = new StringContent(json, Encoding.UTF8, "application/json");
 
@@ -374,6 +380,52 @@ namespace Zexus.Services
         public void Dispose()
         {
             _httpClient?.Dispose();
+        }
+
+        /// <summary>
+        /// Walk the conversation messages and rewrite each internal image block
+        /// (<c>{type:"image", mime_type, data}</c>) into OpenAI's native shape
+        /// (<c>{type:"image_url", image_url:{url:"data:&lt;mime&gt;;base64,&lt;data&gt;",
+        /// detail:"auto"}}</c>).
+        ///
+        /// OpenAiClient does not have a per-block message-conversion step the way
+        /// GeminiClient does — messages are JSON-serialized straight into the
+        /// request body. So image translation runs as a pre-serialize pass here.
+        /// Mutates the list in place; messages without image blocks pass through
+        /// untouched.
+        /// </summary>
+        private static void RewriteImageBlocksForOpenAi(List<Dictionary<string, object>> messages)
+        {
+            if (messages == null) return;
+
+            foreach (var msg in messages)
+            {
+                if (msg == null) continue;
+                if (!msg.TryGetValue("content", out var contentObj)) continue;
+                if (!(contentObj is List<object> blocks)) continue;
+
+                for (int i = 0; i < blocks.Count; i++)
+                {
+                    if (!(blocks[i] is Dictionary<string, object> blockDict)) continue;
+                    if (!blockDict.TryGetValue("type", out var typeObj)) continue;
+                    if (typeObj?.ToString() != "image") continue;
+
+                    var mimeType = blockDict.TryGetValue("mime_type", out var mt) && mt != null
+                        ? mt.ToString()
+                        : "image/png";
+                    var data = blockDict.TryGetValue("data", out var d) ? d?.ToString() : null;
+
+                    blocks[i] = new Dictionary<string, object>
+                    {
+                        ["type"] = "image_url",
+                        ["image_url"] = new Dictionary<string, object>
+                        {
+                            ["url"] = $"data:{mimeType};base64,{data}",
+                            ["detail"] = "auto"
+                        }
+                    };
+                }
+            }
         }
 
         private Dictionary<string, object> ConvertJsonElementDict(Dictionary<string, JsonElement> rawDict)
