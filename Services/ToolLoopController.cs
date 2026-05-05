@@ -256,6 +256,26 @@ namespace Zexus.Services
                     return new ChatMessage { Role = MessageRole.System, Content = $"Error: {response.Error}" };
                 }
 
+                // Image degradation — once the LLM has seen the image, strip the base64
+                // payload from history. Replace it with a "[N image(s) attached]" line
+                // prepended to msg.Content so the conversation stays readable for the
+                // model on later turns without re-sending kilobytes of image data through
+                // every iteration of the tool loop. Idempotent: the ImagesStripped flag
+                // gates BuildApiMessages and prevents repeat processing if this runs again
+                // (e.g. after the auto-continue path below).
+                foreach (var msg in session.Messages)
+                {
+                    if (msg.Images != null && msg.Images.Count > 0 && !msg.ImagesStripped)
+                    {
+                        var placeholder = $"[{msg.Images.Count} image(s) attached]";
+                        msg.Content = string.IsNullOrEmpty(msg.Content)
+                            ? placeholder
+                            : placeholder + "\n" + msg.Content;
+                        msg.Images.Clear();
+                        msg.ImagesStripped = true;
+                    }
+                }
+
                 // Auto-continue when text response is truncated by max_tokens
                 if (response.ToolCalls.Count == 0 && IsMaxTokensTruncated(response.StopReason) && !cancellationToken.IsCancellationRequested)
                 {
@@ -686,10 +706,49 @@ namespace Zexus.Services
             {
                 if (msg.Role == MessageRole.System) continue;
 
+                var role = msg.Role == MessageRole.User ? "user" : "assistant";
+                object content;
+
+                // Multimodal: when the message has un-stripped image attachments, emit a
+                // content-block array (provider-agnostic internal shape). LLM clients
+                // translate these blocks to their native wire format. Images go BEFORE
+                // the text block so providers that process blocks in order "see" the
+                // image before reading the prompt about it.
+                if (msg.Images != null && msg.Images.Count > 0 && !msg.ImagesStripped)
+                {
+                    var blocks = new List<object>();
+
+                    foreach (var img in msg.Images)
+                    {
+                        blocks.Add(new Dictionary<string, object>
+                        {
+                            ["type"] = "image",
+                            ["mime_type"] = img.MimeType,
+                            ["data"] = Convert.ToBase64String(img.Data)
+                        });
+                    }
+
+                    if (!string.IsNullOrEmpty(msg.Content))
+                    {
+                        blocks.Add(new Dictionary<string, object>
+                        {
+                            ["type"] = "text",
+                            ["text"] = msg.Content
+                        });
+                    }
+
+                    content = blocks;
+                }
+                else
+                {
+                    // Text-only (default path — zero behavioural change vs pre-image-input).
+                    content = msg.Content ?? "";
+                }
+
                 allMessages.Add(new Dictionary<string, object>
                 {
-                    ["role"] = msg.Role == MessageRole.User ? "user" : "assistant",
-                    ["content"] = msg.Content ?? ""
+                    ["role"] = role,
+                    ["content"] = content
                 });
             }
 
