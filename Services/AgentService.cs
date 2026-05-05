@@ -100,9 +100,9 @@ namespace Zexus.Services
             _reporter.StartSession(documentName);
         }
 
-        public async Task<ChatMessage> ProcessMessageAsync(string userMessage, CancellationToken cancellationToken = default)
+        public async Task<ChatMessage> ProcessMessageAsync(string userMessage, CancellationToken cancellationToken = default, List<ImageAttachment> images = null)
         {
-            ZexusLogger.Info($"ProcessMessageAsync: {userMessage}");
+            ZexusLogger.Info($"ProcessMessageAsync: {userMessage}{(images != null && images.Count > 0 ? $" [+{images.Count} image(s)]" : "")}");
             
             if (!IsReady)
             {
@@ -196,6 +196,14 @@ namespace Zexus.Services
             _reporter.RecordTurnStart(userMessage, wmSnapshot);
 
             var userMsg = new ChatMessage { Role = MessageRole.User, Content = processedMessage };
+            if (images != null && images.Count > 0)
+            {
+                // Attach the image list so BuildApiMessages emits a multimodal content
+                // block array on the next API call. ToolLoopController strips this list
+                // and replaces it with a "[N image(s) attached]" placeholder after the
+                // first round-trip — see the post-send strip in RunAsync.
+                userMsg.Images = images;
+            }
             _currentSession.AddMessage(userMsg);
 
             try

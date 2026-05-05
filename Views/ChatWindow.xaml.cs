@@ -887,11 +887,7 @@ namespace Zexus.Views
 
             // Snapshot any pending images and clear the preview bar IMMEDIATELY so the UI
             // feels responsive (the user shouldn't see thumbnails linger while we wait on
-            // the LLM). The captured list is the one this turn will send.
-            //
-            // NOTE: this snapshot is currently dropped at the AgentService boundary —
-            // the agent service still uses the legacy text-only signature. Step 5 wires
-            // pendingImages through to the LLM clients.
+            // the LLM). The captured list is what this turn will send.
             List<ImageAttachment> pendingImages = null;
             if (_pendingImages.Count > 0)
             {
@@ -939,7 +935,7 @@ namespace Zexus.Views
                 SetStatus("Thinking...", true);
                 CreateStreamingBubble();
 
-                var response = await _agentService.ProcessMessageAsync(message, _cancellationTokenSource.Token);
+                var response = await _agentService.ProcessMessageAsync(message, _cancellationTokenSource.Token, pendingImages);
 
                 // Capture streaming text before FinalizeStreamingBubble clears it
                 var streamedText = _currentStreamingText?.Text;
