@@ -240,6 +240,7 @@
                         <RowDefinition Height="*"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
 
                     <!-- TITLE BAR -->
@@ -479,8 +480,14 @@
                         </StackPanel>
                     </Border>
 
+                    <!-- IMAGE PREVIEW BAR (auto-hidden when empty; populated by paste handler) -->
+                    <Border x:Name="ImagePreviewBar" Grid.Row="4" Visibility="Collapsed"
+                            Padding="8,6" Background="#08FFFFFF">
+                        <StackPanel x:Name="ImagePreviewPanel" Orientation="Horizontal"/>
+                    </Border>
+
                     <!-- INPUT BAR -->
-                    <Border x:Name="InputBarBorder" Grid.Row="4" CornerRadius="0,0,15,15" Padding="14,10,14,14" Background="#0AFFFFFF">
+                    <Border x:Name="InputBarBorder" Grid.Row="5" CornerRadius="0,0,15,15" Padding="14,10,14,14" Background="#0AFFFFFF">
                         <Border.BorderBrush>
                             <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
                                 <GradientStop Color="#00FFFFFF" Offset="0"/>

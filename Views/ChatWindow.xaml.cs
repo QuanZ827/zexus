@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Threading;
@@ -30,6 +31,10 @@ namespace Zexus.Views
         private bool _isProcessing;
         private Border _currentStreamingBubble;
         private TextBox _currentStreamingText;
+
+        // ─── Image Input (clipboard paste, v0.2.1+) ───
+        private readonly List<ImageAttachment> _pendingImages = new List<ImageAttachment>();
+        private const int MAX_IMAGES_PER_MESSAGE = 3;
 
         // ─── Workspace State ───
         private WorkspaceState _workspaceState;
@@ -90,6 +95,10 @@ namespace Zexus.Views
             _agentService.OnToolCompleted += OnToolCompleted;
             _agentService.OnReasoningForThinkingChain += OnReasoningForThinkingChain;
             _agentService.OnProcessingCompleted += OnProcessingCompleted;
+
+            // Image-paste interceptor — must be PreviewKeyDown so it fires before the
+            // built-in paste handling. (KeyDown="OnInputKeyDown" in XAML stays untouched.)
+            MessageInput.PreviewKeyDown += OnInputPreviewKeyDown;
 
             PositionWindow();
             ThemeManager.ThemeChanged += () => Dispatcher.Invoke(ApplyTheme);
@@ -661,6 +670,138 @@ namespace Zexus.Views
             }
         }
 
+        // ═══════════════════════════════════════════════════════
+        // Image paste (clipboard → preview thumbnail)
+        // ═══════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Intercepts Ctrl+V on the input box. If the clipboard contains an image and
+        /// we're under MAX_IMAGES_PER_MESSAGE, pulls it as PNG bytes, adds it to the
+        /// pending list, refreshes the preview, and consumes the event so the underlying
+        /// TextBox does NOT also try to paste.
+        ///
+        /// Silent no-ops (covers the spec's "4th paste is silently ignored" case):
+        ///   - Clipboard has no image                 → fall through to default paste
+        ///   - Already 3 pending images               → fall through (textbox handles V)
+        ///   - PngBitmapEncoder produces empty bytes  → fall through
+        /// </summary>
+        private void OnInputPreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key != Key.V) return;
+            if (Keyboard.Modifiers != ModifierKeys.Control) return;
+            if (!Clipboard.ContainsImage()) return;
+            if (_pendingImages.Count >= MAX_IMAGES_PER_MESSAGE) return;
+
+            BitmapSource bitmapSource;
+            try { bitmapSource = Clipboard.GetImage(); }
+            catch { return; } // clipboard race — let the default paste try
+
+            if (bitmapSource == null) return;
+
+            byte[] pngBytes;
+            try { pngBytes = ConvertToPngBytes(bitmapSource); }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[Zexus] Image paste encode failed: {ex.Message}");
+                return;
+            }
+
+            if (pngBytes == null || pngBytes.Length == 0) return;
+
+            _pendingImages.Add(new ImageAttachment { Data = pngBytes });
+            UpdateImagePreview();
+            e.Handled = true; // critical — without this WPF also pastes the bitmap as garbage text
+        }
+
+        /// <summary>
+        /// Encode a clipboard BitmapSource to PNG bytes, downscaling first if either
+        /// dimension exceeds 2048px. Vision APIs tile internally, so don't compress harder
+        /// than this — over-compression loses quality without saving meaningful tokens.
+        /// </summary>
+        private byte[] ConvertToPngBytes(BitmapSource source)
+        {
+            const int MAX_DIM = 2048;
+            if (source.PixelWidth > MAX_DIM || source.PixelHeight > MAX_DIM)
+            {
+                double scale = Math.Min(
+                    (double)MAX_DIM / source.PixelWidth,
+                    (double)MAX_DIM / source.PixelHeight);
+                source = new TransformedBitmap(source, new ScaleTransform(scale, scale));
+            }
+
+            var encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(source));
+
+            using (var ms = new MemoryStream())
+            {
+                encoder.Save(ms);
+                return ms.ToArray();
+            }
+        }
+
+        /// <summary>
+        /// Rebuild the ImagePreviewPanel from _pendingImages. Each entry shows a 48px-tall
+        /// thumbnail plus a "✕" remove button. When the list is empty, hide the whole bar.
+        /// </summary>
+        private void UpdateImagePreview()
+        {
+            ImagePreviewPanel.Children.Clear();
+
+            if (_pendingImages.Count == 0)
+            {
+                ImagePreviewBar.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            ImagePreviewBar.Visibility = Visibility.Visible;
+
+            for (int i = 0; i < _pendingImages.Count; i++)
+            {
+                int capturedIndex = i;
+                var imgData = _pendingImages[i].Data;
+
+                // Thumbnail — DecodePixelHeight=48 makes WPF discard pixel data we'll never
+                // render, so a 4K paste doesn't keep a 4K BitmapSource alive in memory.
+                var bmp = new BitmapImage();
+                bmp.BeginInit();
+                bmp.StreamSource = new MemoryStream(imgData);
+                bmp.DecodePixelHeight = 48;
+                bmp.CacheOption = BitmapCacheOption.OnLoad;
+                bmp.EndInit();
+                bmp.Freeze();
+
+                var thumb = new System.Windows.Controls.Image
+                {
+                    Source = bmp,
+                    Height = 48,
+                    Margin = new Thickness(0, 0, 4, 0)
+                };
+
+                var removeBtn = new TextBlock
+                {
+                    Text = "✕",
+                    FontSize = 10,
+                    Foreground = new SolidColorBrush(ColTextSec),
+                    Cursor = Cursors.Hand,
+                    VerticalAlignment = VerticalAlignment.Top,
+                    Margin = new Thickness(-8, 0, 8, 0),
+                    ToolTip = "Remove image"
+                };
+                removeBtn.MouseLeftButtonDown += (s, evt) =>
+                {
+                    if (capturedIndex < _pendingImages.Count)
+                    {
+                        _pendingImages.RemoveAt(capturedIndex);
+                        UpdateImagePreview();
+                    }
+                    evt.Handled = true;
+                };
+
+                ImagePreviewPanel.Children.Add(thumb);
+                ImagePreviewPanel.Children.Add(removeBtn);
+            }
+        }
+
         private void OnNewChat(object sender, RoutedEventArgs e)
         {
             if (_isProcessing) return;
@@ -743,7 +884,26 @@ namespace Zexus.Views
         private async void ProcessMessage()
         {
             var message = MessageInput.Text?.Trim();
-            if (string.IsNullOrEmpty(message)) return;
+
+            // Snapshot any pending images and clear the preview bar IMMEDIATELY so the UI
+            // feels responsive (the user shouldn't see thumbnails linger while we wait on
+            // the LLM). The captured list is the one this turn will send.
+            //
+            // NOTE: this snapshot is currently dropped at the AgentService boundary —
+            // the agent service still uses the legacy text-only signature. Step 5 wires
+            // pendingImages through to the LLM clients.
+            List<ImageAttachment> pendingImages = null;
+            if (_pendingImages.Count > 0)
+            {
+                pendingImages = new List<ImageAttachment>(_pendingImages);
+                _pendingImages.Clear();
+                UpdateImagePreview();
+            }
+
+            // Empty send: nothing to do unless there's text OR at least one image.
+            bool hasText = !string.IsNullOrEmpty(message);
+            bool hasImages = pendingImages != null && pendingImages.Count > 0;
+            if (!hasText && !hasImages) return;
 
             // Hide confirmation buttons when user sends any message
             HideConfirmationButtons();
