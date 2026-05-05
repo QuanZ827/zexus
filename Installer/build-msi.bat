@@ -56,8 +56,14 @@ set "WIX_SRC=%~dp0Zexus.wxs"
 :: Create output directory
 if not exist "%~dp0Output" mkdir "%~dp0Output"
 
+:: WiX 6 resolves Source="..\..." paths in the .wxs against CWD, not against
+:: the .wxs file's location. Anchor CWD to this script's directory so the
+:: relative paths inside Zexus.wxs (..\bin\Release\..., ..\Zexus.addin)
+:: resolve regardless of where the bat was invoked from.
+pushd "%~dp0"
+
 :: Run WiX build
-wix build "%WIX_SRC%" -o "%~dp0Output\Zexus_Setup_v0.2.0.1.msi" -arch x64
+wix build "%WIX_SRC%" -o "%~dp0Output\Zexus_Setup_v0.2.1.0.msi" -arch x64
 if errorlevel 1 (
     echo.
     echo [ERROR] MSI compilation failed!
@@ -67,12 +73,12 @@ if errorlevel 1 (
 
 echo.
 echo Verifying MSI...
-if exist "%~dp0Output\Zexus_Setup_v0.2.0.1.msi" (
+if exist "%~dp0Output\Zexus_Setup_v0.2.1.0.msi" (
     echo.
     echo ==========================================
     echo   SUCCESS!
     echo.
-    echo   MSI Installer: Installer\Output\Zexus_Setup_v0.2.0.1.msi
+    echo   MSI Installer: Installer\Output\Zexus_Setup_v0.2.1.0.msi
     echo.
     echo   This MSI supports Revit 2022-2026.
     echo   Supports silent install: msiexec /i Zexus_Setup.msi /qn
