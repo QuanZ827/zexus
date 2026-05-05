@@ -8,7 +8,7 @@
     <Nullable>disable</Nullable>
     <AssemblyName>Zexus</AssemblyName>
     <RootNamespace>Zexus</RootNamespace>
-    <Version>0.2.0.1</Version>
+    <Version>0.2.1.0</Version>
     <Authors>Zhequan Zhang</Authors>
     <Description>Pure ExecuteCode AI Agent for Revit — Testing Only</Description>
   </PropertyGroup>

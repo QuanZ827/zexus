@@ -252,7 +252,7 @@
                                 <TextBlock Text="Zexus" FontSize="14" FontWeight="SemiBold"
                                            Foreground="#E8EAED" VerticalAlignment="Center"
                                            FontFamily="Google Sans, Segoe UI Variable, Segoe UI"/>
-                                <TextBlock Text="v0.2.0" FontSize="9" Foreground="#3DFFFFFF"
+                                <TextBlock Text="v0.2.1.0" FontSize="9" Foreground="#3DFFFFFF"
                                            VerticalAlignment="Center" Margin="8,2,0,0"/>
                             </StackPanel>
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
@@ -330,7 +330,7 @@
                                             <TextBlock Text="Welcome to Zexus" FontSize="16" FontWeight="SemiBold"
                                                        Foreground="#E8EAED" TextAlignment="Center" Margin="0,0,0,2"
                                                        FontFamily="Google Sans, Segoe UI Variable, Segoe UI, Segoe UI Emoji"/>
-                                            <TextBlock Text="v0.2.0" FontSize="9" FontWeight="SemiBold" TextAlignment="Center"
+                                            <TextBlock Text="v0.2.1.0" FontSize="9" FontWeight="SemiBold" TextAlignment="Center"
                                                        Foreground="#7B61FF" Margin="0,0,0,10"
                                                        FontFamily="Google Sans, Segoe UI Variable, Segoe UI, Segoe UI Emoji"/>
                                             <TextBlock TextWrapping="Wrap" Foreground="#50FFFFFF" FontSize="12" TextAlignment="Left" LineHeight="20"
